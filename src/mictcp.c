@@ -82,9 +82,28 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 
     pdu.header.source_port = sock.local_addr.port;
     pdu.header.dest_port = sock.remote_addr.port;
+    PE = (PE + 1) % 2;
+    pdu.header.seq_num = PE;
 
-    // Sending the PDU
-    int sent_data = IP_send(pdu, sock.remote_addr.ip_addr);
+    // Constructing the ack PDU
+    mic_tcp_pdu ack_pdu;
+
+    int sent_data = -1;
+
+    // Sending the PDU, and checking an ACK comes with a timer
+    int received = -1;
+    while( received == -1 ) {
+        sent_data = IP_send(pdu, sock.remote_addr.ip_addr);
+        received = IP_recv(&ack_pdu, &sock.local_addr.ip_addr, &sock.remote_addr.ip_addr, TIMEOUT);
+        if(received != -1) {
+            if(ack_pdu.header.ack == 1) {
+                if(ack_pdu.header.ack_num == PE) {
+                    break;
+                }
+            }
+        }
+    received = -1;
+    }
 
     return sent_data;
 }
