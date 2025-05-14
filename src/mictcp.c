@@ -3,8 +3,9 @@
 
 
 mic_tcp_sock my_sockets[1];
-
-
+int PE = 0;
+int PA = 0;
+unsigned long TIMEOUT = 1000;
 
 /*
  * Enables to create a socket between the application and MIC-TCP
@@ -82,8 +83,16 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 
     pdu.header.source_port = sock.local_addr.port;
     pdu.header.dest_port = sock.remote_addr.port;
-    PE = (PE + 1) % 2;
+    
     pdu.header.seq_num = PE;
+    PE = (PE + 1) % 2;
+
+    printf("Sending with seq_num : %d\n", pdu.header.seq_num);
+
+    // Not an ACK, FIN or SYN
+    pdu.header.ack = 0;
+    pdu.header.syn = 0;
+    pdu.header.fin = 0;
 
     // Constructing the ack PDU
     mic_tcp_pdu ack_pdu;
@@ -97,6 +106,9 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
         received = IP_recv(&ack_pdu, &sock.local_addr.ip_addr, &sock.remote_addr.ip_addr, TIMEOUT);
         if(received != -1) {
             if(ack_pdu.header.ack == 1) {
+
+                printf("Received with ack_num : %d\n", ack_pdu.header.ack_num);
+
                 if(ack_pdu.header.ack_num == PE) {
                     break;
                 }
@@ -153,5 +165,34 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_ip_addr local_addr, mic_tcp_i
 {
     printf("[MIC-TCP] Call to the function: "); printf(__FUNCTION__); printf("\n");
 
-    app_buffer_put(pdu.payload);
+    printf("ACk = %d\n", pdu.header.ack);
+
+    if(pdu.header.ack == 0) { // not an ack
+
+        printf("In the first if\n");
+
+        printf("Received with seq_num : %d\n", pdu.header.seq_num);
+
+        if(pdu.header.seq_num == PA) {
+            printf("In the second if\n");
+            app_buffer_put(pdu.payload);
+            PA = (PA + 1) % 2;
+        } 
+
+        // Creating the ack PDU
+        mic_tcp_pdu ack_pdu;
+        ack_pdu.header.dest_port = pdu.header.source_port;
+        ack_pdu.header.source_port = pdu.header.dest_port;
+        ack_pdu.header.ack = 1;
+        ack_pdu.header.ack_num = PA; // the old or new PA
+
+        printf("Sending with ack_num : %d\n", ack_pdu.header.ack_num);
+
+        printf("Created ACK PDU\n");
+
+        IP_send(ack_pdu, remote_addr);
+
+        printf("Sent\n");
+    }
+
 }
