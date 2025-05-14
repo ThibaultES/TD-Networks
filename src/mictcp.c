@@ -75,24 +75,17 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
     // Get back the socket
     mic_tcp_sock sock = my_sockets[mic_sock];
 
-    printf("A\n");
-
-
     // Constructing the PDU
     mic_tcp_pdu pdu;
     pdu.payload.data = mesg;
     pdu.payload.size = mesg_size;
 
-    printf("B\n");
-
     pdu.header.source_port = sock.local_addr.port;
     pdu.header.dest_port = sock.remote_addr.port;
 
-    printf("C\n");
     // Sending the PDU
     int sent_data = IP_send(pdu, sock.remote_addr.ip_addr);
 
-    printf("D\n");
     return sent_data;
 }
 
