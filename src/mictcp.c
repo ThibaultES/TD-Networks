@@ -62,7 +62,7 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 
 
 
-// ------------------- V1 : MIC-TCP data transfer without loss recovery -------------------
+// ------------------- V1 : MIC-TCP data transfer without loss recovery --------------------
 
 /*
  * Enables to request the sending of an applicative data
