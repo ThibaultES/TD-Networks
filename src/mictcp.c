@@ -6,6 +6,7 @@ mic_tcp_sock my_sockets[1];
 int PE = 0;
 int PA = 0;
 unsigned long TIMEOUT = 1000;
+int failBuffer[5] = {1,1,1,1,1}; // 0 for fail, 1 for success
 
 /*
  * Enables to create a socket between the application and MIC-TCP
@@ -19,7 +20,7 @@ int mic_tcp_socket(start_mode sm)
    if(result == -1) {
     return -1;
    }
-   set_loss_rate(50); ////////////////////////////////////    LOSS RATE    ///////////////////////////////////////////
+   set_loss_rate(0); ////////////////////////////////////    LOSS RATE    ///////////////////////////////////////////
 
    return 0;
 }
@@ -61,6 +62,28 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 }
 
 
+void pushBuffer(int* buffer, int newData) {
+    int N = 5;
+    for (int i = 0 ; i < N - 1 ; i++) {
+        buffer[i] = buffer[i+1];
+    }
+    buffer[N-1] = newData;
+}
+
+int isGoodBuffer(int* buffer, int acceptapleLossRate) {
+    int N = 5;
+    int nbSuccess = 0;
+    for(int i = 0 ; i < N; i++) {
+        nbSuccess += buffer[i];
+    }
+    if(((N - nbSuccess)*100 / N) < acceptapleLossRate) {
+        return 1;
+    }
+    else {
+        return -1;
+    }
+
+}
 
 
 // ------------------- V1 : MIC-TCP data transfer without loss recovery --------------------
@@ -72,6 +95,8 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 {
     printf("[MIC-TCP] Call to the function: "); printf(__FUNCTION__); printf("\n");
+
+
 
     // Get back the socket
     mic_tcp_sock sock = my_sockets[mic_sock];
@@ -87,6 +112,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
     pdu.header.seq_num = PE;
     PE = (PE + 1) % 2;
 
+
     // Not an ACK, FIN or SYN
     pdu.header.ack = 0;
     pdu.header.syn = 0;
@@ -94,6 +120,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 
     // Constructing the ack PDU
     mic_tcp_pdu ack_pdu;
+    ack_pdu.payload.size = 0;
 
     int sent_data = -1;
 
@@ -103,10 +130,25 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
         sent_data = IP_send(pdu, sock.remote_addr.ip_addr);
         received = IP_recv(&ack_pdu, &sock.local_addr.ip_addr, &sock.remote_addr.ip_addr, TIMEOUT);
         if(received != -1) {
+            // We received a PDU
+            
             if(ack_pdu.header.ack == 1) {
+                // the PDU is an ACK
                 if(ack_pdu.header.ack_num == PE) {
+                    // The ACK has a correct ack number
+                    pushBuffer(failBuffer, 1);
+                    
                     break;
                 }
+                pushBuffer(failBuffer, 0);
+            }
+        }
+        else { // timer timed out
+            pushBuffer(failBuffer, 0);
+
+            if(isGoodBuffer(failBuffer, 25) > 0) {
+                PE = (PE + 1) % 2;
+                break;
             }
         }
     received = -1;
@@ -169,6 +211,7 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_ip_addr local_addr, mic_tcp_i
 
         // Creating the ack PDU
         mic_tcp_pdu ack_pdu;
+        ack_pdu.payload.size = 0;
         ack_pdu.header.dest_port = pdu.header.source_port;
         ack_pdu.header.source_port = pdu.header.dest_port;
         ack_pdu.header.ack = 1;
