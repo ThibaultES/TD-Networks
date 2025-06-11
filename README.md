@@ -1,89 +1,58 @@
 # BE RESEAU
 ## TPs BE Reseau - 3 MIC
 
-Les détails du sujet du BE est accessible depuis le cours "Programmation Système et Réseau" sur moodle.
+This BE is the work of Thibault Eynard-Suarez and Jaehyung Cho.
+
+## Version 4.2
+### What works
+
+The transfer of data with any loss rate and a choosen acceptability loss rate (ACCEPT_RATE).
+The establishment and closing of the connection in accordance with the TCP model.
+The negotiation of the acceptable loss rate in text mode.
+
+### What doesn't work
+
+The negotiation of the acceptable loss rate in the video mode. The demand for accepting is sent but the
+data transfer of the video happens immediatly anyway.
 
 
-## Contenu du dépôt « template » fourni
-Ce dépôt inclut le code source initial fourni pour démarrer le BE. Plus précisément : 
-  - README.md (ce fichier) qui notamment décrit la préparation de l’environnement de travail et le suivi des versions de votre travail; 
-  - tsock_texte et tsock_video : lanceurs pour les applications de test fournies. 
-  - dossier include : contenant les définitions des éléments fournis que vous aurez à manipuler dans le cadre du BE.
-  - dossier src : contenant l'implantation des éléments fournis et à compléter dans le cadre du BE.
-  - src/mictcp.c : fichier au sein duquel vous serez amenés à faire l'ensemble de vos contributions (hors bonus éventuels). 
+### Implementation choices
+
+#### Stop & Wait
+
+We chose to have a variable size circular buffer (of size BUFFER_LENGTH) to stock the informations on the last successes or losses in sent packages.
+We then compare the loss rate of the current buffer to the acceptable loss rate we set to see if a new package can be lost or needs to be recovered.
+
+#### Negotiation of the losses
+
+We chose to have a set acceptibility loss rate (ACCEPT_RATE) in the code. When the connection is established the acceptable loss rate is shared to the
+receiver in the payload of the syn pdu. The receiver is then asked if they want to accept or refuse this acceptibility loss rate. 
+To make our tests easier and because a more complex mechanism was not needed the loss rate is accepted whatever the receiver says.
+In video mode, the video starts before the receiver can answer the question.
+
+#### Asynchronism
+
+To take care of asynchronism we used multithreading. The synchronism phase are locked with a mutex, and we use a ptread_cond_wait() on a condition to allow other functions to work while waiting for the receiver answer. When the needed functions are done, they wake up the other threads with a pthread_cond_broadcast().
+
+### Benefits of MICTCP over TCP
+
+#### Text
+
+For the text mode, MICTCP is not very interesting. We usually do not want to allow any loss in the text we receive.
+Thus in text mode we consider TCP as better than MICTCP.
 
 
-## Création du dépôt mictcp 
+#### Video
 
-1. Création d’un compte git étudiant : Si vous ne disposez pas d’un compte git, connectez vous sur http://github.com/ et créez un compte par binôme. 
+The length of the video we were making tests upon is 30s.
 
-2. Afin d’être capable de mettre à jour le code que vous aurez produit sur le dépôt central Github, il vous faudra créer un jeton d’accès qui jouera le rôle de mot de passe. Veuillez le sauvegarder, car il vous le sera demandé lors de l'accès au dépôt central. Pour ce faire, veuillez suivre les étapes décrites : https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token
+We saw with a 50 % loss rate than MICTCP with a 10 % acceptibility loss rate took 142 seconds to send the whole video, with 20 % acceptibility loss rate it took 98s.
+On the other hand, TCP (wich was emulated with MICTCP with a 0 % acceptibility loss rate to be able to see times in our tests) took 151s.
 
-3. Création d’un dépôt Etudiant sur GitHub pour le BE Reseau
-  
-   Créer une copie du dépôt template enseignant : https://github.com/rezo-insat/mictcp, en vous y rendant et en cliquant sur le bouton « use this template » situé dans le coin en haut, plutôt à droite de la page. Il est demandé de le choisir comme dépôt privé. Il est impératif pour les corrections que vous rajoutiez le compte : rezo-insat comme collaborateur afin de permettre à vos enseignants d'accéder à votre dépôt. Pour ce faire, sélectionner le bouton "settings" puis "collaborators" et rajouter comme utilisateur : rezo-insat. La marche à suivre est décrite ci-après : https://docs.github.com/en/organizations/managing-access-to-your-organizations-repositories/adding-outside-collaborators-to-repositories-in-your-organization
-
-
-4. Créer un clone local de votre dépôt Github, i.e. une copie locale du dépôt sur votre compte insa. 
-  
-    cliquer sur le bouton « code » de votre dépôt, copier l’URL qui permet de l’identifier. 
-	Ouvrir un terminal de votre machine. En vous plaçant dans le répertoire de travail de votre choix, taper depuis le terminal :
-
-        git clone <url de votre dépôt>
-
-    Vous avez désormais une copie locale de votre dépôt, que vous pouvez mettre à jour et modifier à volonté au gré de votre avancement sur les TPs. 
-
-5. Afin de nous permettre d’avoir accès à votre dépôt, merci de bien vouloir renseigner l'URL de votre dépôt sur le fichier accessible depuis le lien "fichier URLs dépôts étudiants" se trouvant sur moodle (au niveau de la section: BE Reseau).
-
-## Compilation du protocole mictcp et lancement des applications de test fournies
-
-Pour compiler mictcp et générer les exécutables des applications de test depuis le code source fourni, taper :
-
-    make
-
-Deux applicatoins de test sont fournies, tsock_texte et tsock_video, elles peuvent être lancées soit en mode puits, soit en mode source selon la syntaxe suivante:
-
-    Usage: ./tsock_texte [-p|-s destination] port
-    Usage: ./tsock_video [[-p|-s] [-t (tcp|mictcp)]
-
-Seul tsock_video permet d'utiliser, au choix, votre protocole mictcp ou une émulation du comportement de tcp sur un réseau avec pertes.
-
-## Suivi de versions de votre travail
-
-Vous pouvez travailler comme vous le souhaitez sur le contenu du répertoire local. Vous pouvez mettre à jour les fichiers existants, rajouter d’autres ainsi que des dossiers et en retirer certains à votre guise. 
-
-Pour répercuter les changements que vous faites sur votre répertoire de travail local sur le dépôt central GitHub, sur votre terminal, taper :
- 
-    git add .
-    git commit -m «un message décrivant la mise à jour»
-    git push
-
-- Marquage des versions successives de votre travail sur mictcp 
- 
-Lorsque vous le souhaitez, git permet d'associer une étiquette à un état précis de votre dépôt par l'intermédiaires de tags. Il vous est par exemple possible d'utiliser ce mécanisme pour marquer (et par conséquence pouvoir retrouver) l'état de votre dépôt pour chacune des versions successives de votre travail sur mictcp.
-
-Pour Créer un tag « v1 » et l'associer à l'état courrant de votre dépôt, vous taperez la commande suivante sur votre terminal :
-
-    git tag v1
-
-Pour lister les tags existants au sein de votre dépôt
-
-    git tag -l
-
-Pour transférer les tags de votre dépôt local vers le dépôt central sur github:
-
-    git push origin --tags
+With a 5 % loss rate, MICTCP with a 10% acceptibility loss rate took 34s to send the video and TCP took 35s.
 
 
-Ceci permettra à votre enseignant de positionner le dépôt dans l'état ou il était au moment du marquage avec chacun des tags que vous définissez. 
-   
-## Suivi de votre avancement 
+What we concluded is that on high loss rates, MICTCP shines the most, it enables much faster times that TCP which needs to recover too many packages. The quality of the 
+video with a 10 % acceptibility loss rate still being good.
 
-Veuillez utiliser, à minima, un tag pour chacune des versions successives de mictcp qui sont définies au sein du sujet du BE disponible sous moodle.
-
-
-## Liens utiles 
-
-Aide pour la création d’un dépôt depuis un template : https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template
-
-Manuel d'utilisation de git: https://git-scm.com/docs
+However, for low loss rates, even if MICTCP is still faster, it is not significantly faster than TCP. Since it means it is not much faster but with a much lower quality, we concluded TCP can be better for very low loss rates.
