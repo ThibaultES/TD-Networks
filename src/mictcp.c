@@ -3,6 +3,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #define BUFFER_LENGTH 20
 
@@ -11,7 +12,10 @@ int PE = 0;
 int PA = 0;
 unsigned long TIMEOUT = 10;
 int failBuffer[BUFFER_LENGTH] = { 0 }; // 1 for fail, 0 for success
-int ACCEPT_RATE = 10;
+int ACCEPT_RATE = 0;
+
+time_t begin;
+time_t end;
 
 pthread_mutex_t mutex;
 pthread_cond_t cond;
@@ -28,7 +32,7 @@ int mic_tcp_socket(start_mode sm)
    if(result == -1) {
     return -1;
    }
-   set_loss_rate(30); ////////////////////////////////////    LOSS RATE    ///////////////////////////////////////////
+   set_loss_rate(5); ////////////////////////////////////    LOSS RATE    ///////////////////////////////////////////
 
    return 0;
 }
@@ -58,9 +62,7 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 
     pthread_mutex_lock(&mutex);
 
-    //printf("Waiting for the state to become SYN_RECEIVED\n");
     while(my_sockets[socket].state != SYN_RECEIVED) {
-        //printf("WAIT\n");
         pthread_cond_wait(&cond, &mutex);
     }
     pthread_mutex_unlock(&mutex);
@@ -77,10 +79,7 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
     synack.header.syn = 1;
     synack.header.fin = 0;
 
-    IP_send(synack, my_sockets[socket].remote_addr.ip_addr); // only once 
-    //printf("Just sent the SYNACK\n");
-
-    //printf("Waiting for the state to become ESTABLISHED\n");
+    IP_send(synack, my_sockets[socket].remote_addr.ip_addr);
 
     pthread_mutex_lock(&mutex);
     while(my_sockets[socket].state != ESTABLISHED) {
@@ -100,21 +99,18 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 {
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+    begin = time(NULL);
 
     my_sockets[socket].remote_addr = addr;
-    //mic_tcp_sock my_sock = my_sockets[socket];
 
     if(my_sockets[socket].state != IDLE) {
-        //printf("Already connected or establishing a connection\n");
         return -1;
     }
 
     mic_tcp_pdu syn;
-    //syn.payload.data = ""; // admissible loss rate in percent
-    //syn.payload.size = 0;
 
     syn.header.source_port = my_sockets[socket].local_addr.port;
-    syn.header.dest_port = my_sockets[socket].remote_addr.port; // = addr.port
+    syn.header.dest_port = my_sockets[socket].remote_addr.port;
 
     syn.header.ack = 0;
     syn.header.syn = 1;
@@ -131,15 +127,11 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 
     int received = -1;
     my_sockets[socket].state = SYN_SENT;
-    //printf("-> STATE = SYN_SENT\n");
 
     while(received == -1) {
         IP_send(syn, addr.ip_addr);
-        //printf("- Just sent a SYN -\n");
         received = IP_recv(&acksyn, &my_sockets[socket].local_addr.ip_addr, &addr.ip_addr, TIMEOUT);
-        //printf("- SYN ACK Timeout -\n");
         if(acksyn.header.syn == 1 && acksyn.header.ack == 1) {
-            //printf("- Receided SYN ACK -\n");
             break;
         }
         received = -1;
@@ -159,25 +151,24 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 
     int ack_received = 0;
     while (ack_received != -1) {
-        //printf("- Waiting -\n");
         ack_received = IP_recv(&acksyn, &my_sockets[socket].local_addr.ip_addr, &addr.ip_addr, 5*TIMEOUT);
         if(acksyn.header.syn == 1 && acksyn.header.ack == 1) {
             IP_send(ack, addr.ip_addr);
-            //printf("- Resending ACK -\n");
         }
     }
 
-    //printf("- Sent last ACK -\n");
     my_sockets[socket].state = ESTABLISHED;
-    //printf("-> STATE = ESTABLISHED\n");
     printf("- Connection established -\n");
 
     return 0;
 }
 
+// ----------------------------------------------------------------------------------------------------
+// Functions to store and manipulate a circular buffer of informations on last N (BUUFER_LENGTH) losses
 
-
-// Functions to store and manipulate a circular buffer of informations on last 5 losses
+/*
+ * Updates the circular buffer after a new package was sent, adding 0 if it succeded, 1 if it failed
+ */
 void pushBuffer(int* buffer, int newData)
 {
     int N = BUFFER_LENGTH;
@@ -187,6 +178,10 @@ void pushBuffer(int* buffer, int newData)
     buffer[N-1] = newData;
 }
 
+/*
+ * Checks if a new package can be accepted to be lost by comparing
+ * ACCEPT_RATE to the current loss rate in the buffer
+ */
 int isGoodBuffer(int* buffer)
 {
     int nbFail = 0;
@@ -212,8 +207,6 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 {
     printf("[MIC-TCP] Call to the function: "); printf(__FUNCTION__); printf("\n");
 
-
-
     // Get back the socket
     mic_tcp_sock sock = my_sockets[mic_sock];
 
@@ -227,7 +220,6 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
     
     pdu.header.seq_num = PE;
     PE = (PE + 1) % 2;
-
 
     // Not an ACK, FIN or SYN
     pdu.header.ack = 0;
@@ -297,13 +289,17 @@ int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
 
 
 /*
- * Permet de réclamer la destruction d’un socket.
- * Engendre la fermeture de la connexion suivant le modèle de TCP.
- * Retourne 0 si tout se passe bien et -1 en cas d'erreur
+ * Enables to ask for the destruction of a socket
+ * Makes the closing of the connection according to the TCP model
+ * Returns 0 if everything went well and -1 if failure
  */
 int mic_tcp_close (int socket)
 {
     printf("[MIC-TCP] Appel de la fonction :  "); printf(__FUNCTION__); printf("\n");
+    end = time(NULL);
+    unsigned long secondes = (unsigned long) difftime( end, begin );
+    printf("The time is : %ld s\n", secondes);
+
     return 1;
 }
 
@@ -319,9 +315,7 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_ip_addr local_addr, mic_tcp_i
     printf("[MIC-TCP] Call to the function: "); printf(__FUNCTION__); printf("\n");
 
     if(my_sockets[0].state == ESTABLISHED){
-        //printf("> Connected <\n");
         if(pdu.header.ack == 0) { // not an ack
-            //printf("> Received ack <\n");
 
             if(pdu.header.seq_num == PA) {
                 app_buffer_put(pdu.payload);
@@ -338,12 +332,10 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_ip_addr local_addr, mic_tcp_i
 
 
             IP_send(ack_pdu, remote_addr);
-            //printf("> Well answered to message <\n");
         }
     }
 
     if(my_sockets[0].state == IDLE) {
-        //printf("State = IDLE\n");
 
         if(pdu.header.syn == 1){ // A syn
 
@@ -355,10 +347,8 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_ip_addr local_addr, mic_tcp_i
 
             int lossRate = atoi(pdu.payload.data);
             char answer;
-            //while(answer != 'y'){
             printf("Loss Rate is %d : do you agree ? [y/n]\n", lossRate);
             scanf("%c", &answer);
-            //}
             if(answer == 'y') {
                 printf("Loss rate accepted, continuing the connection.\n");
             }
@@ -376,7 +366,6 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_ip_addr local_addr, mic_tcp_i
 
  
     if(my_sockets[0].state == SYN_RECEIVED) {
-        //printf("State = Syn received\n");
 
         if(pdu.header.ack == 1) {
             my_sockets[0].state = ESTABLISHED;
